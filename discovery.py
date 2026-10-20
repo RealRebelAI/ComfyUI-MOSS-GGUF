@@ -8,7 +8,7 @@ MODELS = {
     "vae": ("vae",),
 }
 EXTENSIONS = {
-    "gguf": (".gguf",),
+    "gguf": (".gguf", ".safetensors"),
     "encoder": (".safetensors", ".pt", ".pth"),
     "vae": (".safetensors", ".pt", ".pth"),
 }
