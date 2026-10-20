@@ -230,16 +230,61 @@ def load_bf16(path, precision):
     return patcher
 
 
+
+def load_convrot(path, precision):
+    """Load Comfy-native INT8/W4A8 ConvRot with the official MOSS model."""
+    import comfy.utils
+    from .quantized import normalize_quantized_state
+
+    if precision not in ("bf16", "fp32"):
+        raise ValueError(f"Unsupported MOSS ConvRot compute precision: {precision}")
+    try:
+        import comfy.ops
+        import comfy.quant_ops
+        from comfy_kitchen.tensor import QuantizedTensor  # noqa: F401
+    except ImportError as exc:
+        raise RuntimeError(
+            "INT8/W4A8 ConvRot requires a recent ComfyUI and comfy-kitchen "
+            "with native quantized mixed-precision operations."
+        ) from exc
+
+    state, metadata = comfy.utils.load_torch_file(
+        path, safe_load=True, return_metadata=True
+    )
+    state, converted, formats = normalize_quantized_state(state)
+    dtype = {"bf16": torch.bfloat16, "fp32": torch.float32}[precision]
+    # No GGUF operations: ComfyUI reads per-module .comfy_quant metadata
+    # and selects its native mixed_precision_ops implementation.
+    patcher = _native_moss_loaders().load_model_state(
+        state, dtype, disable_dynamic=False, metadata=metadata
+    )
+    _patch_model_instance(patcher, dtype)
+    patcher.cached_patcher_init = (load_convrot, (path, precision))
+    logger.info(
+        "MOSS ConvRot loaded %s: %d fused QKV layers split; formats=%s",
+        Path(path).name, converted, formats,
+    )
+    return patcher
+
+
+def load_safetensors(path, precision):
+    """Dispatch by embedded quant metadata, never by filename alone."""
+    from safetensors import safe_open
+    with safe_open(path, framework="pt", device="cpu") as reader:
+        quantized = any(k.endswith(".comfy_quant") for k in reader.keys())
+    return load_convrot(path, precision) if quantized else load_bf16(path, precision)
+
+
 def load_transformer(path, precision):
-    """Dispatch one existing Rebel MODEL node to GGUF or BF16 safetensors."""
+    """Dispatch one Rebel MODEL node to GGUF or native safetensors formats."""
     suffix = Path(path).suffix.casefold()
     if suffix == ".gguf":
         return load_gguf(path, precision)
     if suffix == ".safetensors":
-        return load_bf16(path, precision)
+        return load_safetensors(path, precision)
     raise ValueError(
         f"Unsupported MOSS transformer format: {Path(path).name}. "
-        "Choose a MOSS GGUF or an unquantized BF16 .safetensors checkpoint."
+        "Choose a MOSS GGUF, BF16, INT8 ConvRot, or W4A8 ConvRot checkpoint."
     )
 
 
