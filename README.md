@@ -8,22 +8,24 @@ Run quantized **OpenMOSS MOSS-Image** diffusion transformers through ComfyUI wit
 
 ## Features
 
-- **GGUF and BF16 transformer selection in one node:** Choose a quantized `.gguf` or an unquantized `.safetensors` from the same dropdown. BF16 uses the official OpenMOSS model-state loader, not GGUF ops.\n- **MOSS-specific GGUF transformer loader:** Uses the official MOSS model architecture with the quantized operations from `city96/ComfyUI-GGUF`.
+- **GGUF and BF16 transformer selection in one node:** Choose a quantized `.gguf` or an unquantized `.safetensors` from the same dropdown. BF16 uses the official OpenMOSS model-state loader, not GGUF ops.
+- **MOSS-specific GGUF transformer loader:** Uses the official MOSS model architecture with the quantized operations from `city96/ComfyUI-GGUF`.
 - **Separate text encoder loader:** Loads the MOSS Qwen3.5 encoder through the official OpenMOSS loader.
 - **Separate VAE loader:** Loads the MOSS-compatible VAE.
 - **Dropdown discovery:** Scans standard ComfyUI model directories and subfolders, with no absolute file paths required in the workflow.
 - **Model inventory:** Reports which compatible files the node package can discover.
 - **Base and SFT:** The same loader handles compatible quantizations of either checkpoint; choose the corresponding GGUF in the dropdown.
+- **Fused-QKV LoRA support:** Rebel LoRA nodes adapt fused QKV LoRA weights for the official MOSS architecture on both GGUF and BF16 backends.
 - **Local attention dtype adaptation:** Handles GGUF integer-weight storage and mixed-precision attention without editing upstream MOSS or ComfyUI-GGUF source files.
 
-The runtime consists of `__init__.py`, `discovery.py`, `runtime.py`, and `bf16.py`. **No audit scripts or development utilities are required to generate images.**
+The runtime consists of `__init__.py`, `discovery.py`, `runtime.py`, `bf16.py`, and `moss_lora.py`. **No audit scripts or development utilities are required to generate images.**
 
 ## Requirements
 
 1. [ComfyUI](https://github.com/comfyanonymous/ComfyUI) with a compatible PyTorch installation.
 2. The **official OpenMOSS MOSS-Image ComfyUI integration**, including its MOSS model and encoder loaders: [OpenMOSS/MOSS-Image](https://github.com/OpenMOSS/MOSS-Image/tree/main/comfyui).
 3. [city96/ComfyUI-GGUF](https://github.com/city96/ComfyUI-GGUF).
-4. A compatible MOSS-Image **DiT GGUF**, a **Qwen3.5-9B text encoder**, and a **MOSS / FLUX.2-compatible VAE**.
+4. A compatible MOSS-Image **DiT GGUF or BF16 safetensors**, a **Qwen3.5-9B text encoder**, and a **MOSS / FLUX.2-compatible VAE**.
 
 **Dependency folder names matter:** The current runtime discovers upstream modules by their loaded file locations. Keep the upstream MOSS integration directory named `moss-image` (or `moss_image`) and the city96 plugin directory containing `ComfyUI-GGUF`. **This repository's own folder may be renamed.** Do not rename the dependency directories arbitrarily.
 
@@ -31,7 +33,7 @@ The runtime consists of `__init__.py`, `discovery.py`, `runtime.py`, and `bf16.p
 
 ### Manual installation
 
-Place the three runtime files together in:
+Place all five runtime files together in:
 
 ```text
 ComfyUI/
@@ -39,7 +41,9 @@ ComfyUI/
     ├── ComfyUI-MOSS-GGUF/
     │   ├── __init__.py
     │   ├── discovery.py
-    │   └── runtime.py
+    │   ├── runtime.py
+    │   ├── bf16.py
+    │   └── moss_lora.py
     ├── ComfyUI-GGUF/
     └── moss-image/
 ```
@@ -48,9 +52,9 @@ Install the official MOSS and ComfyUI-GGUF integrations following **their** inst
 
 Restart ComfyUI after installing or updating the nodes.
 
-### Git installation (after this repository is published)
+### Git installation
 
-Clone **your published repository URL** into `ComfyUI/custom_nodes/` and restart ComfyUI. The repository name can be `ComfyUI-MOSS-GGUF`; no hardcoded local `D:` drive path is needed for the node package.
+Clone [this repository](https://github.com/RealRebelAI/ComfyUI-MOSS-GGUF) into `ComfyUI/custom_nodes/` and restart ComfyUI. Existing clones can update with `git pull`.
 
 ## Model files
 
@@ -68,7 +72,7 @@ Subfolders are supported. The dropdown displays a category-prefixed relative pat
 
 ## Nodes
 
-All four nodes appear under **`MOSS-Image/Rebel (GGUF)`** (category retained for existing workflows). The transformer's input socket is still named `gguf` for backward compatibility, but the dropdown now also accepts BF16 safetensors.
+All six nodes appear under **`MOSS-Image/Rebel (GGUF)`** (category retained for existing workflows). The transformer's input socket is still named `gguf` for backward compatibility, but the dropdown now also accepts BF16 safetensors.
 
 | Node as displayed in ComfyUI | Inputs | Output | Purpose |
 | --- | --- | --- | --- |
@@ -76,6 +80,8 @@ All four nodes appear under **`MOSS-Image/Rebel (GGUF)`** (category retained for
 | **MOSS-Image Qwen3.5 Encoder (Rebel)** | `encoder`, `device` | `CLIP` | Loads the MOSS text encoder through the official OpenMOSS loader. |
 | **MOSS-Image VAE (Rebel)** | `vae` | `VAE` | Loads the VAE for decoding. |
 | **MOSS Model Inventory (Rebel)** | None | `STRING` and UI report | Lists model search paths and discovered files. |
+| **MOSS-Image LoRA (Rebel)** | `model`, `clip`, `lora_name`, `strength_model`, `strength_clip` | `MODEL`, `CLIP` | Loads LoRAs, including fused QKV adapters, for Rebel MOSS GGUF or BF16 transformers. |
+| **MOSS-Image LoRA Model Only (Rebel)** | `model`, `lora_name`, `strength_model` | `MODEL` | Model-only LoRA loading without a CLIP connection. |
 
 **Transformer compute precision:** `bf16` (default) or `fp32`. The encoder offers `default` and `cpu` placement. These are the options implemented by the current nodes.
 
@@ -83,6 +89,7 @@ All four nodes appear under **`MOSS-Image/Rebel (GGUF)`** (category retained for
 
 ```text
 MOSS-Image GGUF Transformer (Rebel)
+  → MOSS-Image LoRA Model Only (Rebel) [optional]
   → ModelSamplingSD3 (shift 5)
   → SkipLayerGuidanceDiTSimple (single_layers "22", start 0, end 1)
   → KSampler [MODEL]
@@ -96,6 +103,16 @@ EmptyFlux2LatentImage (1024 × 1024) → KSampler [latent_image]
 KSampler [samples] → VAEDecode → SaveImage
 MOSS-Image VAE (Rebel) → VAEDecode [vae]
 ```
+
+### LoRA compatibility (GGUF and BF16)
+
+**Use the MOSS-Image LoRA (Rebel) node or the Model Only variant instead of ComfyUI's generic LoRA Loader** when a LoRA contains fused `diffusion_model.layers.N.proj.qkv.lora_A.weight` / `.lora_B.weight` keys. The generic loader silently skips those adapters because the upstream OpenMOSS model has three separate `q`, `k`, and `v` projection weights.
+
+The Rebel LoRA node splits each fused B matrix along the output dimension and reuses the original A matrix for Q, K, and V. It preserves alpha and DoRA scales, validates target dimensions, then uses ComfyUI's standard LoRA patcher (including city96's GGUF-aware model patcher). This is mathematically equivalent to applying the fused adapter before separating the projections. Other ordinary, already-compatible LoRA keys pass through unchanged. You can stack multiple Rebel LoRA nodes.
+
+Place your LoRA files in `ComfyUI/models/loras/`. The **Model Only** variant is convenient for transformer-only LoRAs and does not require a text-encoder connection. The model+clip variant is available when a LoRA also includes text-encoder weights.
+
+**Important:** The native ComfyUI LoRA Loader is **not automatically modified** by this package. To eliminate the fused-QKV warnings, replace that node with the Rebel variant and reconnect the same MODEL path. CPU mathematical tests passed; LoRA application has not yet been end-to-end GPU-validated on this particular model.
 
 ### Recommended first-test settings
 
@@ -123,7 +140,9 @@ Use a fixed seed when comparing SFT vs. Base or Q4 vs. Q5. Changing the model va
 
 **Not a generic GGUF loader:** Ordinary GGUF LLM applications such as LM Studio and llama.cpp text inference do not run this image-generation DiT. Generic ComfyUI GGUF loaders may also lack MOSS architecture support.
 
-**BF16 path:** Original `moss_image_sft_bf16.safetensors`, `moss_image_base_bf16.safetensors`, and complete LoRA-merged BF16 checkpoints can be selected. The loader maps fused `layers.N.proj.qkv.weight` tensors to the official separate q/k/v projection layout using zero-copy views. The actual BF16 model and the Qwen encoder are still subject to ComfyUI's memory management; BF16 inference has not yet been GPU-validated on this Rebel node.\n\n**Not a W4A8 loader:** W4A8 ConvRot `.safetensors` is a different quantization format. **Do not select W4A8 files in the GGUF transformer dropdown.** Use a separately verified compatible safetensors quantization path.
+**BF16 path:** Original `moss_image_sft_bf16.safetensors`, `moss_image_base_bf16.safetensors`, and complete LoRA-merged BF16 checkpoints can be selected. The loader maps fused `layers.N.proj.qkv.weight` tensors to the official separate q/k/v projection layout using zero-copy views. The actual BF16 model and the Qwen encoder are still subject to ComfyUI's memory management; BF16 inference has not yet been GPU-validated on this Rebel node.
+
+**Not a W4A8 loader:** W4A8 ConvRot `.safetensors` is a different quantization format. **Do not select W4A8 files in the GGUF transformer dropdown.** Use a separately verified compatible safetensors quantization path.
 
 **No model weights included:** Download the model, encoder, and VAE separately. This GitHub repository is for the node integration only.
 
@@ -161,7 +180,8 @@ Model file size is not peak VRAM usage. The encoder, VAE, attention activations,
 
 ## Compatibility and release status
 
-- The Base Q4_K_S-v2 GGUF has completed local image-generation smoke tests on an RTX 3070-class GPU.\n- BF16 checkpoint loading, QKV mapping, and attention adaptation are newly added and have **not** been end-to-end verified on a local RTX 3070. The earlier `Cannot copy out of meta tensor; no data!` error was observed in the **negative prompt/text encoder** path, so enabling BF16 transformer loading does not establish a fix for that separate problem.
+- The Base Q4_K_S-v2 GGUF has completed local image-generation smoke tests on an RTX 3070-class GPU.
+- BF16 checkpoint loading, QKV mapping, and attention adaptation are newly added and have **not** been end-to-end verified on a local RTX 3070. The earlier `Cannot copy out of meta tensor; no data!` error was observed in the **negative prompt/text encoder** path, so enabling BF16 transformer loading does not establish a fix for that separate problem.
 - The current adapter's attention behavior has undergone synthetic numerical checks; **that is not a full GPU end-to-end correctness certification**.
 - SFT, other quantization tiers, upstream dependency updates, and W4A8 paths must not be represented as comprehensively validated.
 - No benchmark FPS, VRAM guarantee, or image-quality parity claim is made here.
