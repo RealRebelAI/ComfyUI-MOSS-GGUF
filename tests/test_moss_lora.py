@@ -105,3 +105,32 @@ def test_conflicting_adapters_fail():
             f"{stem}.lora_B.weight": torch.ones(18, 2),
             "diffusion_model.layers.0.proj.q.lora_A.weight": torch.ones(2, 6),
         }, model())
+
+
+def test_apply_verifies_all_qkv_patches(monkeypatch):
+    import sys
+    import types
+
+    instance = model()
+    instance.patches = {}
+    stem = "diffusion_model.layers.0.proj.qkv"
+    lora = {
+        f"{stem}.lora_A.weight": torch.ones(2, 6),
+        f"{stem}.lora_B.weight": torch.ones(18, 2),
+    }
+    sd = types.ModuleType("comfy.sd")
+
+    def fake_load(model_arg, clip, weights, strength_model, strength_clip, lora_metadata=None):
+        for letter in "qkv":
+            base = f"diffusion_model.layers.0.proj.{letter}"
+            assert f"{base}.lora_A.weight" in weights
+            model_arg.patches.setdefault(f"{base}.weight", []).append(1)
+        return model_arg, clip
+
+    sd.load_lora_for_models = fake_load
+    comfy = types.ModuleType("comfy")
+    comfy.sd = sd
+    monkeypatch.setitem(sys.modules, "comfy", comfy)
+    monkeypatch.setitem(sys.modules, "comfy.sd", sd)
+    patched, _ = module.apply_moss_lora(instance, None, lora, 1.0, 0.0)
+    assert len(patched.patches) == 3
