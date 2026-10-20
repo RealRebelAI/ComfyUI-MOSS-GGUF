@@ -198,6 +198,51 @@ def load_gguf(path, precision):
     return patcher
 
 
+def load_bf16(path, precision):
+    """Load an original or LoRA-merged MOSS BF16 checkpoint, without GGUF ops.
+
+    Official OpenMOSS models expect separate q/k/v projections, while the
+    Comfy-Org BF16 repack stores fused qkv. Split via zero-copy tensor views
+    before calling the official model-state loader. Use ComfyUI's dynamic
+    model patcher and offloading for low-VRAM systems.
+    """
+    if precision not in ("bf16", "fp32"):
+        raise ValueError(f"Unsupported MOSS BF16 compute precision: {precision}")
+    import comfy.utils
+    from .bf16 import normalize_bf16_state
+
+    state, metadata = comfy.utils.load_torch_file(
+        path, safe_load=True, return_metadata=True
+    )
+    state, converted = normalize_bf16_state(state)
+    dtype = {"bf16": torch.bfloat16, "fp32": torch.float32}[precision]
+    patcher = _native_moss_loaders().load_model_state(
+        state, dtype, disable_dynamic=False, metadata=metadata
+    )
+    # The official attention path may yield fp32 q/k and bf16 v. Keep
+    # the same per-instance dtype guard as the working GGUF bridge.
+    _patch_model_instance(patcher, dtype)
+    patcher.cached_patcher_init = (load_bf16, (path, precision))
+    logger.info(
+        "MOSS BF16 loaded %d tensors from %s; split %d fused QKV layers",
+        len(state), Path(path).name, converted,
+    )
+    return patcher
+
+
+def load_transformer(path, precision):
+    """Dispatch one existing Rebel MODEL node to GGUF or BF16 safetensors."""
+    suffix = Path(path).suffix.casefold()
+    if suffix == ".gguf":
+        return load_gguf(path, precision)
+    if suffix == ".safetensors":
+        return load_bf16(path, precision)
+    raise ValueError(
+        f"Unsupported MOSS transformer format: {Path(path).name}. "
+        "Choose a MOSS GGUF or an unquantized BF16 .safetensors checkpoint."
+    )
+
+
 def load_encoder(path, device):
     """Actual official Qwen3.5 loader; supports Comfy-native quant metadata."""
     moss = _native_moss_loaders()
