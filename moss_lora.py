@@ -118,7 +118,7 @@ def apply_moss_lora(model, clip, lora, strength_model, strength_clip, metadata=N
             match = _FUSED_A.fullmatch(key)
             if match:
                 unwrapped = re.sub(
-                    r"^(?:diffusion_model|transformer|base_model\\.model|model)\\.",
+                    r"^(?:diffusion_model|transformer|base_model\.model|model)\.",
                     "", match.group("stem"),
                 )
                 expected.update(
