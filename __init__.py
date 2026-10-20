@@ -5,12 +5,12 @@ No manual path widgets, hidden model copies, or modifications to those plugins.
 """
 import folder_paths
 from .discovery import options, resolve, inventory
-from .runtime import load_gguf, load_encoder, load_vae
+from .runtime import load_transformer, load_encoder, load_vae
 
 CAT = "MOSS-Image/Rebel (GGUF)"
 
 class RebelMossGGUF:
-    TITLE = "MOSS-Image GGUF Transformer (Rebel)"
+    TITLE = "MOSS-Image GGUF / BF16 Transformer (Rebel)"
     CATEGORY = CAT
     RETURN_TYPES = ("MODEL",)
     RETURN_NAMES = ("model",)
@@ -24,7 +24,7 @@ class RebelMossGGUF:
         }}
 
     def load(self, gguf, compute_precision):
-        return (load_gguf(resolve("gguf", gguf, folder_paths), compute_precision),)
+        return (load_transformer(resolve("gguf", gguf, folder_paths), compute_precision),)
 
 class RebelMossEncoder:
     TITLE = "MOSS-Image Qwen3.5 Encoder (Rebel)"
