@@ -112,12 +112,12 @@ def apply_moss_lora(model, clip, lora, strength_model, strength_clip, metadata=N
     import comfy.sd
 
     converted, count = split_fused_qkv_loras(lora, model)
-    before = len(model.patches) if model is not None else 0
+    before = sum(len(patches) for patches in model.patches.values()) if model is not None else 0
     patched_model, patched_clip = comfy.sd.load_lora_for_models(
         model, clip, converted, strength_model, strength_clip,
         lora_metadata=metadata,
     )
-    after = len(patched_model.patches) if patched_model is not None else 0
+    after = sum(len(patches) for patches in patched_model.patches.values()) if patched_model is not None else 0
     if strength_model != 0 and count and after <= before:
         raise RuntimeError(
             "MOSS fused QKV LoRA was converted but no model patches were installed. "
