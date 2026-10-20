@@ -112,17 +112,39 @@ def apply_moss_lora(model, clip, lora, strength_model, strength_clip, metadata=N
     import comfy.sd
 
     converted, count = split_fused_qkv_loras(lora, model)
-    before = sum(len(patches) for patches in model.patches.values()) if model is not None else 0
+    expected = set()
+    if strength_model != 0:
+        for key in lora:
+            match = _FUSED_A.fullmatch(key)
+            if match:
+                unwrapped = re.sub(
+                    r"^(?:diffusion_model|transformer|base_model\\.model|model)\\.",
+                    "", match.group("stem"),
+                )
+                expected.update(
+                    f"diffusion_model.{unwrapped}.{letter}.weight" for letter in "qkv"
+                )
+    before = {
+        key: len(model.patches.get(key, ())) for key in expected
+    }
     patched_model, patched_clip = comfy.sd.load_lora_for_models(
         model, clip, converted, strength_model, strength_clip,
         lora_metadata=metadata,
     )
-    after = sum(len(patches) for patches in patched_model.patches.values()) if patched_model is not None else 0
-    if strength_model != 0 and count and after <= before:
+    missing = [
+        key for key in sorted(expected)
+        if patched_model is None
+        or len(patched_model.patches.get(key, ())) <= before[key]
+    ]
+    if missing:
         raise RuntimeError(
-            "MOSS fused QKV LoRA was converted but no model patches were installed. "
-            "Check that the MODEL input comes from Rebel MOSS GGUF/BF16."
+            f"MOSS LoRA conversion succeeded, but {len(missing)} Q/K/V patches "
+            f"were not installed: {missing[:6]}. "
+            "Check the MODEL input and ComfyUI LoRA compatibility."
         )
     if strength_model != 0 and count:
-        _LOG.info("MOSS LoRA: %d fused QKV blocks patched successfully", count)
+        _LOG.info(
+            "MOSS LoRA: verified %d Q/K/V projection patches across %d fused blocks",
+            len(expected), count,
+        )
     return patched_model, patched_clip
