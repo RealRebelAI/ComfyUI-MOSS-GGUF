@@ -1,14 +1,14 @@
-# ComfyUI-MOSS-GGUF — GGUF + BF16
+# ComfyUI-MOSS-GGUF — GGUF + BF16 + ConvRot
 
-**Modular MOSS-Image GGUF and BF16 loading for ComfyUI — by [Rebel AI](https://huggingface.co/realrebelai).**
+**Modular MOSS-Image GGUF, BF16, and Comfy-native ConvRot loading for ComfyUI — by [Rebel AI](https://huggingface.co/realrebelai).**
 
 Run quantized **OpenMOSS MOSS-Image** diffusion transformers through ComfyUI with separate, dropdown-based loaders for the GGUF transformer, Qwen3.5 text encoder, and VAE. Supports both **MOSS-Image-SFT** and **MOSS-Image-Base** checkpoints when converted to the compatible MOSS GGUF format.
 
-> **Status: experimental.** End-to-end inference has worked with a locally generated Base Q4_K_S GGUF. The latest attention adapter has been checked with synthetic numerical tests, but complete equivalence to upstream BF16 inference, all quantization tiers, and SFT image quality have **not** been established. This is a community integration, not an official OpenMOSS release.
+> **Status: experimental.** End-to-end inference has worked with a locally generated Base Q4_K_S GGUF. The latest attention adapter has been checked with synthetic numerical tests, but complete equivalence to upstream BF16 inference, all quantization tiers, and SFT image quality have **not** been established. INT8 ConvRot and W4A8 ConvRot safetensors have passed CPU adapter tests but **have not been validated by end-to-end GPU image generation**. This is a community integration, not an official OpenMOSS release.
 
 ## Features
 
-- **GGUF and BF16 transformer selection in one node:** Choose a quantized `.gguf` or an unquantized `.safetensors` from the same dropdown. BF16 uses the official OpenMOSS model-state loader, not GGUF ops.
+- **GGUF, BF16, and native ConvRot transformer selection in one node:** Choose a MOSS `.gguf`, unquantized BF16 `.safetensors`, or Comfy-native INT8 ConvRot / W4A8 ConvRot `.safetensors` from the same dropdown. Safetensors loading uses the official OpenMOSS model-state loader, not GGUF ops.
 - **MOSS-specific GGUF transformer loader:** Uses the official MOSS model architecture with the quantized operations from `city96/ComfyUI-GGUF`.
 - **Separate text encoder loader:** Loads the MOSS Qwen3.5 encoder through the official OpenMOSS loader.
 - **Separate VAE loader:** Loads the MOSS-compatible VAE.
@@ -18,11 +18,11 @@ Run quantized **OpenMOSS MOSS-Image** diffusion transformers through ComfyUI wit
 - **Fused-QKV LoRA support:** Rebel LoRA nodes adapt fused QKV LoRA weights for the official MOSS architecture on both GGUF and BF16 backends.
 - **Local attention dtype adaptation:** Handles GGUF integer-weight storage and mixed-precision attention without editing upstream MOSS or ComfyUI-GGUF source files.
 
-The runtime consists of `__init__.py`, `discovery.py`, `runtime.py`, `bf16.py`, and `moss_lora.py`. **No audit scripts or development utilities are required to generate images.**
+The runtime consists of `__init__.py`, `discovery.py`, `runtime.py`, `bf16.py`, `quantized.py`, and `moss_lora.py`. **No audit scripts or development utilities are required to generate images.**
 
 ## Requirements
 
-1. [ComfyUI](https://github.com/comfyanonymous/ComfyUI) with a compatible PyTorch installation.
+1. [ComfyUI](https://github.com/comfyanonymous/ComfyUI) with a compatible PyTorch installation. Native INT8/W4A8 ConvRot additionally requires a recent ComfyUI with mixed-precision quantized ops and compatible `comfy-kitchen`.
 2. The **official OpenMOSS MOSS-Image ComfyUI integration**, including its MOSS model and encoder loaders: [OpenMOSS/MOSS-Image](https://github.com/OpenMOSS/MOSS-Image/tree/main/comfyui).
 3. [city96/ComfyUI-GGUF](https://github.com/city96/ComfyUI-GGUF).
 4. A compatible MOSS-Image **DiT GGUF or BF16 safetensors**, a **Qwen3.5-9B text encoder**, and a **MOSS / FLUX.2-compatible VAE**.
@@ -33,7 +33,7 @@ The runtime consists of `__init__.py`, `discovery.py`, `runtime.py`, `bf16.py`, 
 
 ### Manual installation
 
-Place all five runtime files together in:
+Place all six runtime files together in:
 
 ```text
 ComfyUI/
@@ -43,6 +43,7 @@ ComfyUI/
     │   ├── discovery.py
     │   ├── runtime.py
     │   ├── bf16.py
+    │   ├── quantized.py
     │   └── moss_lora.py
     ├── ComfyUI-GGUF/
     └── moss-image/
@@ -62,7 +63,7 @@ The GGUF is the **diffusion transformer only**. The encoder and VAE are separate
 
 | Component | Recommended location | Supported selection |
 | --- | --- | --- |
-| MOSS-Image GGUF or BF16 (SFT or Base) | `ComfyUI/models/diffusion_models/` or `ComfyUI/models/unet/` | `.gguf`, `.safetensors` (BF16 only) |
+| MOSS-Image GGUF, BF16, or Comfy-native ConvRot (SFT or Base) | `ComfyUI/models/diffusion_models/` or `ComfyUI/models/unet/` | `.gguf`, `.safetensors` (BF16, INT8 ConvRot, W4A8 ConvRot) |
 | Qwen3.5-9B text encoder | `ComfyUI/models/text_encoders/` or `ComfyUI/models/clip/` | `.safetensors`, `.pt`, `.pth` |
 | MOSS / FLUX.2-compatible VAE | `ComfyUI/models/vae/` | `.safetensors`, `.pt`, `.pth` |
 
@@ -72,11 +73,11 @@ Subfolders are supported. The dropdown displays a category-prefixed relative pat
 
 ## Nodes
 
-All six nodes appear under **`MOSS-Image/Rebel (GGUF)`** (category retained for existing workflows). The transformer's input socket is still named `gguf` for backward compatibility, but the dropdown now also accepts BF16 safetensors.
+All six nodes appear under **`MOSS-Image/Rebel (GGUF)`** (category retained for existing workflows). The transformer's input socket is still named `gguf` for backward compatibility, but the dropdown also accepts BF16 and native ConvRot safetensors.
 
 | Node as displayed in ComfyUI | Inputs | Output | Purpose |
 | --- | --- | --- | --- |
-| **MOSS-Image GGUF / BF16 Transformer (Rebel)** | `gguf`, `compute_precision` | `MODEL` | Loads a MOSS-format DiT GGUF or BF16 safetensors through the appropriate backend. |
+| **MOSS-Image GGUF / BF16 Transformer (Rebel)** | `gguf`, `compute_precision` | `MODEL` | Loads a MOSS-format DiT GGUF, BF16 safetensors, or Comfy-native ConvRot safetensors through the appropriate backend. |
 | **MOSS-Image Qwen3.5 Encoder (Rebel)** | `encoder`, `device` | `CLIP` | Loads the MOSS text encoder through the official OpenMOSS loader. |
 | **MOSS-Image VAE (Rebel)** | `vae` | `VAE` | Loads the VAE for decoding. |
 | **MOSS Model Inventory (Rebel)** | None | `STRING` and UI report | Lists model search paths and discovered files. |
@@ -142,9 +143,16 @@ Use a fixed seed when comparing SFT vs. Base or Q4 vs. Q5. Changing the model va
 
 **BF16 path:** Original `moss_image_sft_bf16.safetensors`, `moss_image_base_bf16.safetensors`, and complete LoRA-merged BF16 checkpoints can be selected. The loader maps fused `layers.N.proj.qkv.weight` tensors to the official separate q/k/v projection layout using zero-copy views. The actual BF16 model and the Qwen encoder are still subject to ComfyUI's memory management; BF16 inference has not yet been GPU-validated on this Rebel node.
 
-**Not a W4A8 loader:** W4A8 ConvRot `.safetensors` is a different quantization format. **Do not select W4A8 files in the GGUF transformer dropdown.** Use a separately verified compatible safetensors quantization path.
+**Experimental Comfy-native ConvRot path:** The same transformer dropdown now detects per-module `.comfy_quant` metadata in `.safetensors` files and dispatches INT8 ConvRot (`int8_tensorwise` with `convrot: true`) and W4A8 ConvRot (`asym_w4a8_int8`) to ComfyUI's native quantized operations. Fused `layers.N.proj.qkv` weights, scales, and codebooks are remapped to separate q/k/v projections without dequantizing the full checkpoint. This requires recent ComfyUI and `comfy-kitchen` support. Unsupported quantization formats fail explicitly. This is **not** a GGUF conversion, and successful end-to-end GPU inference has not yet been verified.
 
 **No model weights included:** Download the model, encoder, and VAE separately. This GitHub repository is for the node integration only.
+
+
+### Native ConvRot troubleshooting
+
+If a ConvRot safetensors file is rejected, confirm it contains ComfyUI per-module `.comfy_quant` tensors. A plain INT8 tensor checkpoint without this metadata cannot be loaded by this path. Check for `comfy-kitchen` and a recent ComfyUI build; older installations may not recognize `asym_w4a8_int8`. W4A8 is packed int4 weight / int8 activation, **not** a GGUF Q4 file. Test with a known-good SFT checkpoint first, and report full tracebacks for any kernel or missing-key errors.
+
+Run the CPU adapter tests from the repository root with `python -m unittest discover -s tests -p 'test_quantized.py' -v` (requires PyTorch).
 
 ## Troubleshooting
 
@@ -183,7 +191,8 @@ Model file size is not peak VRAM usage. The encoder, VAE, attention activations,
 - The Base Q4_K_S-v2 GGUF has completed local image-generation smoke tests on an RTX 3070-class GPU.
 - BF16 checkpoint loading, QKV mapping, and attention adaptation are newly added and have **not** been end-to-end verified on a local RTX 3070. The earlier `Cannot copy out of meta tensor; no data!` error was observed in the **negative prompt/text encoder** path, so enabling BF16 transformer loading does not establish a fix for that separate problem.
 - The current adapter's attention behavior has undergone synthetic numerical checks; **that is not a full GPU end-to-end correctness certification**.
-- SFT, other quantization tiers, upstream dependency updates, and W4A8 paths must not be represented as comprehensively validated.
+- INT8 ConvRot and W4A8 ConvRot QKV conversion passed CPU-only synthetic tests; end-to-end inference on a GPU, image quality, performance, and VRAM behavior remain unverified.
+- SFT, other quantization tiers, and upstream dependency updates must not be represented as comprehensively validated.
 - No benchmark FPS, VRAM guarantee, or image-quality parity claim is made here.
 
 If reporting a bug, include the exact GGUF filename, ComfyUI version, OpenMOSS integration version, city96 plugin version, GPU, and traceback.
